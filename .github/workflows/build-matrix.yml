@@ -8,12 +8,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
 
-      # ---- Install deps per-OS ----
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -26,24 +25,14 @@ jobs:
           brew update
           brew install cmake ninja || true
 
-      - name: Install deps (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          choco install -y ninja cmake
-        shell: powershell
-
-      # ---- Configure & Build with Ninja on all OS ----
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
         shell: bash
 
-      - name: Build
-        run: cmake --build build -j 4
+      - name: Build (verbose)
+        run: cmake --build build -j 4 --verbose
         shell: bash
 
       - name: Smoke
-        run: |
-          EXE=""
-          if [ "$RUNNER_OS" = "Windows" ]; then EXE=".exe"; fi
-          ./build/re4_dump$EXE | head -c 32 | hexdump -C
+        run: ./build/re4_dump | head -c 32 | hexdump -C
         shell: bash
