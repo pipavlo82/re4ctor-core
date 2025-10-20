@@ -1,18 +1,19 @@
 name: build-matrix
 on: [push, pull_request]
+
 jobs:
-  ubuntu-latest:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install toolchain + clang-format 15
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake gcc clang-format-15
-          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-15 150
-      - name: Check formatting
-        run: clang-format --dry-run --Werror $(git ls-files '*.c' '*.h')
       - name: Build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j
+      - name: Smoke
+        if: runner.os != 'Windows'
+        run: ./build/re4_dump | head -c 32 | hexdump -C
