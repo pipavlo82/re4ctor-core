@@ -1,14 +1,16 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Заповнює dst n байтами ентропії.
-// Повертає 0 при успіху, -1 при помилці.
-int re4_sys_entropy(uint8_t *dst, size_t n);
+// HW entropy (x86_64): повертає 1 якщо успішно, 0 якщо ні
+int re4_hw_rdrand(uint64_t *out);
+int re4_hw_rdseed(uint64_t *out);
+
+// Системна ентропія (/dev/urandom або інше джерело), повертає кількість байтів
+size_t re4_sys_entropy(void *buf, size_t n);
 
 #ifdef __cplusplus
 }
