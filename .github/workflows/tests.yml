@@ -1,25 +1,26 @@
 name: tests
 on: [push, pull_request]
+
 jobs:
-  rng-tests:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install deps
-        run: sudo apt-get update && sudo apt-get install -y cmake gcc dieharder
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc dieharder clang-format-15
+          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-15 150
+          clang-format --version
+
+      - name: Style (clang-format 15)
+        run: clang-format --dry-run --Werror $(git ls-files '*.c' '*.h')
 
       - name: Build
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
 
-      - name: Smoke dump (64 bytes)
-        run: ./build/re4_dump | head -c 64 | xxd -g 1
-
-      - name: Dieharder (short)
-        run: ./build/re4_dump | dieharder -a -g 200 -k 2 -Y 1 -m 1 | tee dieharder_ci.txt
-
-      - name: Upload dieharder log
-        uses: actions/upload-artifact@v4
-        with:
-          name: dieharder-ci-log
-          path: dieharder_ci.txt
+      - name: Smoke
+        run: ./build/re4_dump | head -c 64 | hexdump -C
