@@ -10,7 +10,7 @@ int re4_hw_rdrand(uint64_t *out);
 int re4_hw_rdseed(uint64_t *out);
 
 // Системна ентропія (/dev/urandom або інше джерело), повертає кількість байтів
-size_t re4_sys_entropy(void *buf, size_t n);
+int re4_sys_entropy(uint8_t *dst, size_t n);
 
 #ifdef __cplusplus
 }
