@@ -1,3 +1,5 @@
+[![tests](https://github.com/pipavlo82/re4ctor-core/actions/workflows/tests.yml/badge.svg)](https://github.com/pipavlo82/re4ctor-core/actions/workflows/tests.yml) [![build-matrix](https://github.com/pipavlo82/re4ctor-core/actions/workflows/build-matrix.yml/badge.svg)](https://github.com/pipavlo82/re4ctor-core/actions/workflows/build-matrix.yml)
+
 # RE4CTOR Core
 
 [![Build](https://github.com/pipavlo82/re4ctor-core/actions/workflows/build.yml/badge.svg)](https://github.com/pipavlo82/re4ctor-core/actions/workflows/build.yml)
