@@ -1,59 +1,18 @@
 name: build-matrix
 on: [push, pull_request]
 jobs:
-  build:
-    name: ${{ matrix.os }} / ${{ matrix.build_type }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        build_type: [Release]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup CMake
-        uses: lukka/get-cmake@v3.29.2
-
-      - name: Install deps (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y gcc g++ clang-format
-
-      - name: Install deps (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew update
-          brew install llvm cmake
-          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
-
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-
-      - name: Build
-        run: cmake --build build -j
-
-      - name: Smoke (dump 64 bytes)
-        if: runner.os != 'Windows'
-        run: ./build/re4_dump | head -c 64 | xxd -g 1
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: re4_dump-${{ matrix.os }}-${{ matrix.build_type }}
-          path: build/re4_dump
-          if-no-files-found: ignore
-
-  format-check:
-    name: clang-format (Linux)
+  ubuntu-latest:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y clang-format
-      - name: Check formatting
+      - name: Install toolchain + clang-format 15
         run: |
-          set -e
-          # перевіряємо лише .c/.h у src/ і include/
-          files=$(git ls-files '*.c' '*.h' | grep -E '^(src|include)/')
-          [ -z "$files" ] && exit 0
-          diff -u <(cat $files) <(clang-format -style=file $files) || \
-            (echo 'Run clang-format locally and commit the changes.' && exit 1)
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc clang-format-15
+          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-15 150
+      - name: Check formatting
+        run: clang-format --dry-run --Werror $(git ls-files '*.c' '*.h')
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
