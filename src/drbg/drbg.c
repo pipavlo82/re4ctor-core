@@ -142,7 +142,8 @@ static int need_reseed(re4_ctx *ctx) {
   return 0;
 }
 
-int re4_reseed(re4_ctx *ctx) {
+int re4_reseed(re4_ctx *ctx, const char *reason) {
+  (void)reason;
   if (!ctx) return -1;
   unsigned char seed[64];
   size_t got = re4_sys_entropy(seed, sizeof(seed));
@@ -166,7 +167,7 @@ int re4_random(re4_ctx *ctx, void *out, size_t n) {
   if (!ctx->st.healthy) return -2;
 
   if (need_reseed(ctx)) {
-    if (re4_reseed(ctx) != 0) return -3;
+    if (re4_reseed(ctx, NULL) != 0) return -3;
   }
 
   uint8_t *p = (uint8_t *)out;

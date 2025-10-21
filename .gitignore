@@ -6,3 +6,4 @@ proof/
 *.log
 *.txt
 .DS_Store
+*.bak
