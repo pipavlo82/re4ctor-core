@@ -16,7 +16,12 @@ add_executable(re4_dump
   src/sp800_90b/estimator.c
 )
 
+target_include_directories(re4_dump PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
 target_link_libraries(re4_dump PRIVATE re4ctor_core)
+target_include_directories(re4_dump PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 # math lib не потрібен на Windows
 if (WIN32)
