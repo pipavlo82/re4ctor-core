@@ -1,60 +1,19 @@
-#include <limits.h>
-#include "re4/entropy.h"
 #include <stdint.h>
-#include <string.h>
-
-#if defined(_WIN32)
-#include <windows.h>
-#include <bcrypt.h>
-#pragma comment(lib, "bcrypt.lib")
-#else
-#include <errno.h>
+#include <stddef.h>
+#include <limits.h>
 #include <fcntl.h>
 #include <unistd.h>
-#endif
+#include <string.h>
+#include <errno.h>
 
-// ---------- System entropy ----------
-static size_t re4_sys_entropy_impl(void *buf, size_t n) {
-#if defined(_WIN32)
-  // CNG: BCryptGenRandom
-  if (!buf || n == 0) return 0;
-  NTSTATUS st = BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-  return st == 0 ? n : 0;
-#else
-  if (!buf || n == 0) return 0;
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd < 0) return 0;
-  size_t off = 0;
-  while (off < n) {
-    ssize_t r = read(fd, (uint8_t *)buf + off, n - off);
-    if (r <= 0) {
-      if (errno == EINTR) continue;
-      break;
-    }
-    off += (size_t)r;
-  }
-  close(fd);
-  return off;
-#endif
-}
-
-// ---------- HW intrinsics (x86-64) ----------
-#if (defined(__x86_64__) || defined(_M_X64))
-// GCC/Clang/MSVC: immintrin provides rdrand/rdseed intrinsics
-#if defined(__has_include)
-#if __has_include(<immintrin.h>)
+#if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 #endif
-#else
-#include <immintrin.h>
-#endif
-#endif
 
+// --- HW intrinsics (best-effort) ---
 int re4_hw_rdrand(uint64_t *out) {
-#if (defined(__x86_64__) || defined(_M_X64))
+#if defined(__x86_64__) || defined(_M_X64)
   unsigned long long tmp = 0ULL;
-// Some compilers need the CPU feature flag at compile-time; CI adds it where supported.
-#if defined(__RDRND__) || defined(_MSC_VER)
   int ok = _rdrand64_step(&tmp);
   if (ok) {
     *out = (uint64_t)tmp;
@@ -62,20 +21,14 @@ int re4_hw_rdrand(uint64_t *out) {
   }
   return 0;
 #else
-  (void)tmp;
-  (void)out;
-  return 0;
-#endif
-#else
   (void)out;
   return 0;
 #endif
 }
 
 int re4_hw_rdseed(uint64_t *out) {
-#if (defined(__x86_64__) || defined(_M_X64))
+#if defined(__x86_64__) || defined(_M_X64)
   unsigned long long tmp = 0ULL;
-#if defined(__RDSEED__) || defined(_MSC_VER)
   int ok = _rdseed64_step(&tmp);
   if (ok) {
     *out = (uint64_t)tmp;
@@ -83,237 +36,44 @@ int re4_hw_rdseed(uint64_t *out) {
   }
   return 0;
 #else
-  (void)tmp;
-  (void)out;
-  return 0;
-#endif
-#else
   (void)out;
   return 0;
 #endif
 }
 
-size_t re4_sys_entropy(void *buf, size_t n) {
+// --- Portable system entropy (/dev/urandom) ---
+// returns number of bytes written, or -1 on error
+static size_t re4_sys_entropy_impl(void *buf, size_t n) {
   if (!buf || n == 0) return 0;
 
-  uint8_t *dst = (uint8_t *)buf;
-  size_t wrote = 0;
+  int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return 0;
 
-  /* 1) Основне джерело — /dev/urandom */
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd >= 0) {
-    while (wrote < n) {
-      ssize_t r = read(fd, dst + wrote, n - wrote);
-      if (r <= 0) break;
-      wrote += (size_t)r;
-    }
-    close(fd);
-  }
+  uint8_t *p = (uint8_t *)buf;
+  size_t left = n;
 
-  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
-#if defined(__x86_64__) || defined(_M_X64)
-  uint64_t x;
-  while (wrote + sizeof(x) <= n) {
-    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
-      memcpy(dst + wrote, &x, sizeof(x));
-      wrote += sizeof(x);
+  while (left > 0) {
+    ssize_t r = read(fd, p, left);
+    if (r > 0) {
+      p += (size_t)r;
+      left -= (size_t)r;
+    } else if (r == 0) {
+      break; // EOF (майже неможливо для urandom)
     } else {
-      break;
+      if (errno == EINTR) continue;
+      close(fd);
+      return 0;
     }
   }
-#endif
 
-  return wrote;
+  close(fd);
+  return n - left;
 }
-size_t re4_sys_entropy(void *buf, size_t n) {
-  if (!buf || n == 0) return 0;
 
-  uint8_t *dst = (uint8_t *)buf;
-  size_t wrote = 0;
-
-  /* 1) Основне джерело — /dev/urandom */
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd >= 0) {
-    while (wrote < n) {
-      ssize_t r = read(fd, dst + wrote, n - wrote);
-      if (r <= 0) break;
-      wrote += (size_t)r;
-    }
-    close(fd);
-  }
-
-  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
-#if defined(__x86_64__) || defined(_M_X64)
-  uint64_t x;
-  while (wrote + sizeof(x) <= n) {
-    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
-      memcpy(dst + wrote, &x, sizeof(x));
-      wrote += sizeof(x);
-    } else {
-      break;
-    }
-  }
-#endif
-
-  return wrote;
-}
-size_t re4_sys_entropy(void *buf, size_t n) {
-  if (!buf || n == 0) return 0;
-
-  uint8_t *dst = (uint8_t *)buf;
-  size_t wrote = 0;
-
-  /* 1) Основне джерело — /dev/urandom */
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd >= 0) {
-    while (wrote < n) {
-      ssize_t r = read(fd, dst + wrote, n - wrote);
-      if (r <= 0) break;
-      wrote += (size_t)r;
-    }
-    close(fd);
-  }
-
-  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
-#if defined(__x86_64__) || defined(_M_X64)
-  uint64_t x;
-  while (wrote + sizeof(x) <= n) {
-    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
-      memcpy(dst + wrote, &x, sizeof(x));
-      wrote += sizeof(x);
-    } else {
-      break;
-    }
-  }
-#endif
-
-  return wrote;
-}
-size_t re4_sys_entropy(void *buf, size_t n) {
-  if (!buf || n == 0) return 0;
-
-  uint8_t *dst = (uint8_t *)buf;
-  size_t wrote = 0;
-
-  /* 1) Основне джерело — /dev/urandom */
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd >= 0) {
-    while (wrote < n) {
-      ssize_t r = read(fd, dst + wrote, n - wrote);
-      if (r <= 0) break;
-      wrote += (size_t)r;
-    }
-    close(fd);
-  }
-
-  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
-#if defined(__x86_64__) || defined(_M_X64)
-  uint64_t x;
-  while (wrote + sizeof(x) <= n) {
-    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
-      memcpy(dst + wrote, &x, sizeof(x));
-      wrote += sizeof(x);
-    } else {
-      break;
-    }
-  }
-#endif
-
-  return wrote;
-}
-size_t re4_sys_entropy(void *buf, size_t n) {
-  if (!buf || n == 0) return 0;
-
-  uint8_t *dst = (uint8_t *)buf;
-  size_t wrote = 0;
-
-  /* 1) Основне джерело — /dev/urandom */
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd >= 0) {
-    while (wrote < n) {
-      ssize_t r = read(fd, dst + wrote, n - wrote);
-      if (r <= 0) break;
-      wrote += (size_t)r;
-    }
-    close(fd);
-  }
-
-  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
-#if defined(__x86_64__) || defined(_M_X64)
-  uint64_t x;
-  while (wrote + sizeof(x) <= n) {
-    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
-      memcpy(dst + wrote, &x, sizeof(x));
-      wrote += sizeof(x);
-    } else {
-      break;
-    }
-  }
-#endif
-
-  return wrote;
-}
-size_t re4_sys_entropy(void *buf, size_t n) {
-  if (!buf || n == 0) return 0;
-
-  uint8_t *dst = (uint8_t *)buf;
-  size_t wrote = 0;
-
-  /* 1) Основне джерело — /dev/urandom */
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd >= 0) {
-    while (wrote < n) {
-      ssize_t r = read(fd, dst + wrote, n - wrote);
-      if (r <= 0) break;
-      wrote += (size_t)r;
-    }
-    close(fd);
-  }
-
-  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
-#if defined(__x86_64__) || defined(_M_X64)
-  uint64_t x;
-  while (wrote + sizeof(x) <= n) {
-    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
-      memcpy(dst + wrote, &x, sizeof(x));
-      wrote += sizeof(x);
-    } else {
-      break;
-    }
-  }
-#endif
-
-  return wrote;
-}
-size_t re4_sys_entropy(void *buf, size_t n) {
-  if (!buf || n == 0) return 0;
-
-  uint8_t *dst = (uint8_t *)buf;
-  size_t wrote = 0;
-
-  /* 1) Основне джерело — /dev/urandom */
-  int fd = open("/dev/urandom", O_RDONLY);
-  if (fd >= 0) {
-    while (wrote < n) {
-      ssize_t r = read(fd, dst + wrote, n - wrote);
-      if (r <= 0) break;
-      wrote += (size_t)r;
-    }
-    close(fd);
-  }
-
-  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
-#if defined(__x86_64__) || defined(_M_X64)
-  uint64_t x;
-  while (wrote + sizeof(x) <= n) {
-    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
-      memcpy(dst + wrote, &x, sizeof(x));
-      wrote += sizeof(x);
-    } else {
-      break;
-    }
-  }
-#endif
-
-  return wrote;
+int re4_sys_entropy(uint8_t *dst, size_t n) {
+  if (!dst || n == 0) return -1;
+  size_t got = re4_sys_entropy_impl(dst, n);
+  if (got == 0) return -1;
+  if (got > (size_t)INT_MAX) got = (size_t)INT_MAX;
+  return (int)got;
 }

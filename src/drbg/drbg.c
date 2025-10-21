@@ -145,31 +145,26 @@ static int need_reseed(re4_ctx *ctx) {
 int re4_reseed(re4_ctx *ctx) {
   if (!ctx) return -1;
 
-  /* 1) свіжий seed */
   unsigned char seed[64];
-  size_t got = re4_sys_entropy(seed, sizeof(seed));
-  if (got != sizeof(seed)) return -2;
-
+  int got = re4_sys_entropy(seed, sizeof(seed));
+  if (got != (int)sizeof(seed)) return -2;
   mix_seed(&ctx->core, seed, sizeof(seed));
   memset(seed, 0, sizeof(seed));
 
-  /* 2) швидка оцінка мін-ентропії (SP800-90B MCV) на великій вибірці).
-     НЕ класти 64К на стек — беремо heap, щоб не падати у CI. */
-  size_t samp_len = 65536; /* можна 32768, якщо хочеш менше */
-  uint8_t *samp = (uint8_t *)malloc(samp_len);
+  // quick 90B update after reseed (non-fatal)
+  const size_t samp_len = 65536;
+  unsigned char *samp = (unsigned char *)malloc(samp_len);
   if (samp) {
-    re4_sys_entropy(samp, samp_len);
-    ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len);
+    int g2 = re4_sys_entropy(samp, samp_len);
+    if (g2 > 0) {
+      ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len);
+    }
     memset(samp, 0, samp_len);
     free(samp);
-  } else {
-    /* якщо немає пам’яті — залишаємо попереднє значення, але reseed вважаємо успішним */
   }
 
-  ctx->st.reseed_count += 1;
-  ctx->st.generated_total = 0;
-  ctx->bytes_since_reseed = 0;
-  ctx->last_reseed = (uint64_t)time(NULL);
+  ctx->st.reseed_count++;
+  ctx->last_reseed = time(NULL);
   return 0;
 }
 
