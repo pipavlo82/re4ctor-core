@@ -1,3 +1,4 @@
+#include <limits.h>
 #include "re4/entropy.h"
 #include <stdint.h>
 #include <string.h>
@@ -13,7 +14,7 @@
 #endif
 
 // ---------- System entropy ----------
-size_t re4_sys_entropy(void *buf, size_t n) {
+static size_t re4_sys_entropy_impl(void *buf, size_t n) {
 #if defined(_WIN32)
   // CNG: BCryptGenRandom
   if (!buf || n == 0) return 0;
@@ -90,4 +91,12 @@ int re4_hw_rdseed(uint64_t *out) {
   (void)out;
   return 0;
 #endif
+}
+
+int re4_sys_entropy(uint8_t *dst, size_t n) {
+  if (!dst || n == 0) return -1;
+  size_t got = re4_sys_entropy_impl(dst, n);
+  if (got == 0) return -1;
+  if (got > INT_MAX) got = INT_MAX;
+  return (int)got;
 }
