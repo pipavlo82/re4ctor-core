@@ -1,153 +1,106 @@
-#include "re4/drbg.h"
-#include "../health/health.h"
-#include "../sp800_90b/estimator.h"
-#include "re4/entropy.h"
-#include <stdint.h>
-#include <stdio.h>
+// src/drbg/drbg.c
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <time.h>
 
-typedef struct {
-  uint64_t s[4]; /* xoshiro256** state */
-  uint64_t counter;
-} re4_core_t;
+#include "re4/drbg.h"
+#include "re4/entropy.h"
+#include "sp800_90b/estimator.h"
+
+// --------------------- внутрішні межі/параметри ---------------------
+
+#define RE4_RESEED_BYTES_LIMIT (32ULL * 1024ULL * 1024ULL) // кожні ~32 MiB
+#define RE4_RESEED_TIME_SECONDS 300                        // або кожні 5 хв
+#define RE4_90B_SAMPLE_LEN 65536                           // ~64 KiB для MCV
+
+// --------------------- внутрішній стан DRBG -------------------------
+
+struct re4_core_state {
+  // Це «ядро» з src/core/re4ctor_core.c.
+  // Ми не знаємо його структури тут, лише передаємо в core-функції.
+  uint8_t opaque[256];
+};
 
 struct re4_ctx {
-  re4_core_t core;
-  re4_health_t health;
+  struct re4_core_state core;
   re4_status_t st;
-  char tag[32];
 
-  uint64_t reseed_bytes_limit;  /* policy */
-  uint64_t reseed_time_limit_s; /* policy */
   time_t last_reseed;
-
   uint64_t bytes_since_reseed;
 };
 
-/*--- helpers ---------------------------------------------------------------*/
-static inline uint64_t rotl(const uint64_t x, int k) {
-  return (x << k) | (x >> (64 - k));
+// Ці функції реалізовані у ядрі (src/core/re4ctor_core.c).
+// Не маємо заголовка — викликаємо напряму. Якщо у тебе є хедер, підключи його
+// і видали ці extern (вони тут лише щоб уникнути implicit-decl warnings).
+extern void mix_seed(void *core, const void *seed, size_t seedlen);
+extern void re4_stream(void *core, uint8_t *out, size_t n);
+
+// --------------------- допоміжні функції ----------------------------
+
+static int need_reseed(re4_ctx *ctx) {
+  if (!ctx) return 0;
+  if (ctx->bytes_since_reseed >= RE4_RESEED_BYTES_LIMIT) return 1;
+  time_t now = time(NULL);
+  if (now - ctx->last_reseed >= RE4_RESEED_TIME_SECONDS) return 1;
+  return 0;
 }
-static uint64_t xoshiro256ss(re4_core_t *c) {
-  uint64_t *s = c->s;
-  const uint64_t result = rotl(s[1] * 5, 7) * 9;
-  const uint64_t t = s[1] << 17;
-  s[2] ^= s[0];
-  s[3] ^= s[1];
-  s[1] ^= s[2];
-  s[0] ^= s[3];
-  s[2] ^= t;
-  s[3] = rotl(s[3], 45);
-  c->counter++;
-  return result;
-}
-static void mix_seed(re4_core_t *c, const void *buf, size_t n) {
-  /* absorb with simple xor+splitmix for demo (replace with KDF/hash later) */
-  const uint8_t *p = (const uint8_t *)buf;
-  uint64_t acc = 0x9e3779b97f4a7c15ull;
-  for (size_t i = 0; i < n; ++i) {
-    acc ^= ((uint64_t)p[i]) << ((i & 7) * 8);
-    acc *= 0xbf58476d1ce4e5b9ull;
-    acc ^= acc >> 32;
+
+// Швидка оцінка мін-ентропії за SP800-90B (Most Common Value) для сід-матеріалу.
+static void update_90b_estimate(re4_ctx *ctx) {
+  if (!ctx) return;
+
+  unsigned char *samp = (unsigned char *)malloc(RE4_90B_SAMPLE_LEN);
+  if (!samp) return;
+
+  // NB: re4_sys_entropy повертає int — кількість байтів або 0 при помилці
+  int got = re4_sys_entropy(samp, RE4_90B_SAMPLE_LEN);
+  if (got > 0) {
+    ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, (size_t)got);
   }
-  c->s[0] ^= acc;
-  c->s[1] ^= acc ^ 0x94d049bb133111ebull;
-  c->s[2] ^= acc + 0x2545F4914F6CDD1Dull;
-  c->s[3] ^= acc ^ 0x1a2b3c4d5e6f7788ull;
-  (void)xoshiro256ss(c);
-  (void)xoshiro256ss(c); /* diffuse */
+
+  memset(samp, 0, RE4_90B_SAMPLE_LEN);
+  free(samp);
 }
 
-static uint64_t env_u64(const char *k, uint64_t def) {
-  const char *v = getenv(k);
-  if (!v || !*v) return def;
-  char *end = NULL;
-  unsigned long long x = strtoull(v, &end, 10);
-  if (end == v) return def;
-  return (uint64_t)x;
-}
+// --------------------- публічний API --------------------------------
 
-static void policy_init(struct re4_ctx *ctx) {
-  ctx->reseed_bytes_limit = env_u64("RE4_RESEED_BYTES", 32ull << 20); /* 32 MiB */
-  ctx->reseed_time_limit_s = env_u64("RE4_RESEED_SECS", 600);         /* 10 min */
-
-  uint32_t rct = (uint32_t)env_u64("RE4_HEALTH_RCT_MAXRUN", 33);
-  uint32_t apw = (uint32_t)env_u64("RE4_HEALTH_AP_WIN", 1024);
-  uint32_t apl = (uint32_t)env_u64("RE4_HEALTH_AP_LOW", 317);
-  uint32_t aph = (uint32_t)env_u64("RE4_HEALTH_AP_HIGH", 707);
-  re4_health_init(&ctx->health, rct, apw, apl, aph);
-}
-
-/*--- public API ------------------------------------------------------------*/
 re4_ctx *re4_create(void) {
   re4_ctx *ctx = (re4_ctx *)calloc(1, sizeof(*ctx));
   return ctx;
 }
+
 void re4_free(re4_ctx *ctx) {
-  if (ctx) {
-    memset(ctx, 0, sizeof(*ctx));
-    free(ctx);
-  }
+  if (!ctx) return;
+  // Нульовимо чутливий стан
+  memset(ctx, 0, sizeof(*ctx));
+  free(ctx);
 }
 
 int re4_init(re4_ctx *ctx, const char *domain_tag) {
   if (!ctx) return -1;
-  memset(ctx, 0, sizeof(*ctx));
   (void)domain_tag;
 
+  // 1) Початковий сід із системної ентропії (64 байти)
   unsigned char seed[64];
   int got = re4_sys_entropy(seed, sizeof(seed));
-  if (got != (int)sizeof(seed)) return -2;
+  if (got != (int)sizeof(seed)) {
+    memset(seed, 0, sizeof(seed));
+    return -2;
+  }
 
   mix_seed(&ctx->core, seed, sizeof(seed));
   memset(seed, 0, sizeof(seed));
 
-  // Швидка SP800-90B MCV оцінка
-  const size_t samp_len = 65536;
-  unsigned char *samp = (unsigned char *)malloc(samp_len);
-  if (samp) {
-    int g2 = re4_sys_entropy(samp, samp_len); // ⟵ НЕ sizeof(samp)!
-    if (g2 > 0) {
-      ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, (size_t)g2);
-    }
-    memset(samp, 0, samp_len);
-    free(samp);
-  }
+  // 2) Оцінимо мін-ентропію поточного середовища (90B MCV)
+  update_90b_estimate(ctx);
 
+  // 3) Базовий health-статус
   ctx->st.healthy = 1;
   ctx->st.generated_total = 0;
-  ctx->st.reseed_count = 1; // initial seed already mixed
+  ctx->st.reseed_count = 1; // первинний сід уже зроблено
   ctx->last_reseed = time(NULL);
   ctx->bytes_since_reseed = 0;
-  return 0;
-}
-
-/* SP800-90B MCV on a fresh sample */
-unsigned char samp[65536];
-re4_sys_entropy(samp, sizeof(samp));
-ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len);
-memset(samp, 0, sizeof(samp));
-
-ctx->st.healthy = 1;
-ctx->st.generated_total = 0;
-ctx->st.reseed_count = 1;
-ctx->last_reseed = time(NULL);
-ctx->bytes_since_reseed = 0;
-return 0;
-}
-
-int re4_add_entropy(re4_ctx *ctx, const void *buf, size_t n) {
-  if (!ctx || !buf || !n) return -1;
-  mix_seed(&ctx->core, buf, n);
-  return 0;
-}
-
-static int need_reseed(re4_ctx *ctx) {
-  time_t now = time(NULL);
-  if (ctx->bytes_since_reseed >= ctx->reseed_bytes_limit) return 1;
-  if ((uint64_t)(now - ctx->last_reseed) >= ctx->reseed_time_limit_s) return 1;
   return 0;
 }
 
@@ -156,21 +109,15 @@ int re4_reseed(re4_ctx *ctx) {
 
   unsigned char seed[64];
   int got = re4_sys_entropy(seed, sizeof(seed));
-  if (got != (int)sizeof(seed)) return -2;
+  if (got != (int)sizeof(seed)) {
+    memset(seed, 0, sizeof(seed));
+    return -2;
+  }
+
   mix_seed(&ctx->core, seed, sizeof(seed));
   memset(seed, 0, sizeof(seed));
 
-  // Оновити 90B оцінку (опційно)
-  const size_t samp_len = 65536;
-  unsigned char *samp = (unsigned char *)malloc(samp_len);
-  if (samp) {
-    int g2 = re4_sys_entropy(samp, samp_len);
-    if (g2 > 0) {
-      ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, (size_t)g2);
-    }
-    memset(samp, 0, samp_len);
-    free(samp);
-  }
+  update_90b_estimate(ctx);
 
   ctx->st.reseed_count++;
   ctx->last_reseed = time(NULL);
@@ -186,23 +133,17 @@ int re4_random(re4_ctx *ctx, void *out, size_t n) {
     if (re4_reseed(ctx) != 0) return -3;
   }
 
-  uint8_t *p = (uint8_t *)out;
-  for (size_t i = 0; i < n; ++i) {
-    uint64_t w = xoshiro256ss(&ctx->core);
-    p[i] = (uint8_t)(w & 0xFF);
-  }
+  // re4_stream заповнює байтами з ядра
+  re4_stream(&ctx->core, (uint8_t *)out, n);
 
-  /* health feed on produced bytes */
-  if (!re4_health_feed(&ctx->health, p, n)) {
-    ctx->st.healthy = 0; /* gate output; caller may decide to reseed & retry */
-    return -4;
-  }
-
-  ctx->st.generated_total += n;
-  ctx->bytes_since_reseed += n;
+  ctx->st.generated_total += (uint64_t)n;
+  ctx->bytes_since_reseed += (uint64_t)n;
   return 0;
 }
 
-re4_status_t re4_status(const re4_ctx *ctx) {
-  return ctx ? ctx->st : (re4_status_t){0};
+re4_status_t re4_status(re4_ctx *ctx) {
+  // зручно повертати знімок структури статусу
+  re4_status_t z = {0};
+  if (!ctx) return z;
+  return ctx->st;
 }
