@@ -23,9 +23,8 @@ jobs:
 
       - name: Dieharder quick
         run: |
-          # джерело 200 = stdin_raw ; швидкий набір, 1 прогін, ліміт із невеликими вибірками
-          ./build/re4_dump | dieharder -a -g 200 -k 2 -Y 1 -m 1 \
-            | tee dieharder_ci.txt
+          ./build/re4_dump | head -c $((64*1024*1024)) \
+            | dieharder -a -g 200 -k 2 -Y 1 -m 1 | tee dieharder_ci.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
