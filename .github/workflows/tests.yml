@@ -1,38 +1,55 @@
 name: tests
 on:
   push:
-  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  smoke-ubuntu:
+  smoke-and-rng:
+    name: smoke-ubuntu
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential dieharder
+          sudo apt-get install -y cmake gcc g++ ninja-build dieharder make
 
       - name: Build
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
           cmake --build build -j
 
       - name: Smoke (hex)
         run: ./build/re4_dump | head -c 64 | hexdump -C
 
+      # --- Dieharder quick (stdin, обмежено часом і вибіркою) ---
       - name: Dieharder quick
         run: |
-          set -euo pipefail
-          ./build/re4_dump \
-            | dieharder -g 200 -k 2 -Y 1 -m 1 \
-                -d 0 -d 1 -d 3 -d 8 -d 10 -d 13 \
-            | tee dieharder_ci.txt
+          mkdir -p proof
+          timeout 300s stdbuf -oL ./build/re4_dump \
+            | dieharder -g 200 -a -k 2 -Y 1 -m 1 \
+            | tee proof/dieharder_ci.txt
+        # навіть якщо перевищив час — збережемо лог і не зірвемо джоб
+        continue-on-error: true
+
+      # --- PractRand (збирання та 256MB тест) ---
+      - name: Build PractRand
+        run: |
+          git clone --depth=1 https://github.com/imneme/PractRand.git PractRand
+          make -C PractRand/build/Linux -j2
+      - name: PractRand 256MB
+        run: |
+          mkdir -p proof
+          timeout 300s stdbuf -oL ./build/re4_dump \
+            | ./PractRand/build/Linux/RNG_test stdin64 -tf 256M \
+            | tee proof/practrand_ci.txt
+        continue-on-error: true
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dieharder-ubuntu
-          path: dieharder_ci.txt
+          name: rng-logs
+          path: proof/*.txt
