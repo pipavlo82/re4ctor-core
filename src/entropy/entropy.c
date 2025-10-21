@@ -1,19 +1,70 @@
 #include "re4/entropy.h"
-#include <fcntl.h>
-#include <immintrin.h>
 #include <stdint.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
+#else
+#include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
+#endif
+
+// ---------- System entropy ----------
+size_t re4_sys_entropy(void *buf, size_t n) {
+#if defined(_WIN32)
+  // CNG: BCryptGenRandom
+  if (!buf || n == 0) return 0;
+  NTSTATUS st = BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+  return st == 0 ? n : 0;
+#else
+  if (!buf || n == 0) return 0;
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd < 0) return 0;
+  size_t off = 0;
+  while (off < n) {
+    ssize_t r = read(fd, (uint8_t *)buf + off, n - off);
+    if (r <= 0) {
+      if (errno == EINTR) continue;
+      break;
+    }
+    off += (size_t)r;
+  }
+  close(fd);
+  return off;
+#endif
+}
+
+// ---------- HW intrinsics (x86-64) ----------
+#if (defined(__x86_64__) || defined(_M_X64))
+// GCC/Clang/MSVC: immintrin provides rdrand/rdseed intrinsics
+#if defined(__has_include)
+#if __has_include(<immintrin.h>)
+#include <immintrin.h>
+#endif
+#else
+#include <immintrin.h>
+#endif
+#endif
 
 int re4_hw_rdrand(uint64_t *out) {
-#if defined(__x86_64__) || defined(_M_X64)
-  unsigned long long tmp = 0ULL; // тип, якого вимагає _rdrand64_step
-  int ok = _rdrand64_step(&tmp); // потребує флагу компілятора -mrdrnd
+#if (defined(__x86_64__) || defined(_M_X64))
+  unsigned long long tmp = 0ULL;
+// Some compilers need the CPU feature flag at compile-time; CI adds it where supported.
+#if defined(__RDRND__) || defined(_MSC_VER)
+  int ok = _rdrand64_step(&tmp);
   if (ok) {
     *out = (uint64_t)tmp;
     return 1;
   }
   return 0;
+#else
+  (void)tmp;
+  (void)out;
+  return 0;
+#endif
 #else
   (void)out;
   return 0;
@@ -21,53 +72,22 @@ int re4_hw_rdrand(uint64_t *out) {
 }
 
 int re4_hw_rdseed(uint64_t *out) {
-#if defined(__x86_64__) || defined(_M_X64)
+#if (defined(__x86_64__) || defined(_M_X64))
   unsigned long long tmp = 0ULL;
-  int ok = _rdseed64_step(&tmp); // потребує флагу компілятора -mrdseed
+#if defined(__RDSEED__) || defined(_MSC_VER)
+  int ok = _rdseed64_step(&tmp);
   if (ok) {
     *out = (uint64_t)tmp;
     return 1;
   }
   return 0;
 #else
+  (void)tmp;
   (void)out;
   return 0;
 #endif
-}
-
-static size_t minz(size_t a, size_t b) {
-  return a < b ? a : b;
-}
-
-int re4_sys_entropy(uint8_t *dst, size_t n) {
-  size_t off = 0;
-  uint64_t x;
-
-  // 1) RDSEED блоками по 8 байт
-  while (off + 8 <= n) {
-    if (!re4_hw_rdseed(&x)) break;
-    memcpy(dst + off, &x, 8);
-    off += 8;
-  }
-  // 2) RDRAND блоками по 8 байт (якщо ще лишилось)
-  while (off + 8 <= n) {
-    if (!re4_hw_rdrand(&x)) break;
-    memcpy(dst + off, &x, 8);
-    off += 8;
-  }
-  // 3) Дозаповнити /dev/urandom, якщо треба
-  if (off < n) {
-    int fd = open("/dev/urandom", O_RDONLY);
-    if (fd < 0) return -1;
-    while (off < n) {
-      ssize_t r = read(fd, dst + off, n - off);
-      if (r <= 0) {
-        close(fd);
-        return -1;
-      }
-      off += (size_t)r;
-    }
-    close(fd);
-  }
+#else
+  (void)out;
   return 0;
+#endif
 }
