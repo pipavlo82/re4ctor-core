@@ -104,13 +104,12 @@ int re4_init(re4_ctx *ctx, const char *domain_tag) {
   mix_seed(&ctx->core, seed, sizeof(seed));
   memset(seed, 0, sizeof(seed));
 
-  // Швидка оцінка SP800-90B MCV на старті
+  // Швидка SP800-90B MCV оцінка
   const size_t samp_len = 65536;
   unsigned char *samp = (unsigned char *)malloc(samp_len);
   if (samp) {
-    int g2 = re4_sys_entropy(samp, samp_len);
+    int g2 = re4_sys_entropy(samp, samp_len); // ⟵ НЕ sizeof(samp)!
     if (g2 > 0) {
-      // використовуємо фактично отриману довжину
       ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, (size_t)g2);
     }
     memset(samp, 0, samp_len);
@@ -119,8 +118,9 @@ int re4_init(re4_ctx *ctx, const char *domain_tag) {
 
   ctx->st.healthy = 1;
   ctx->st.generated_total = 0;
-  ctx->st.reseed_count = 1; // ініціальний сид уже був
+  ctx->st.reseed_count = 1; // initial seed already mixed
   ctx->last_reseed = time(NULL);
+  ctx->bytes_since_reseed = 0;
   return 0;
 }
 
@@ -160,7 +160,7 @@ int re4_reseed(re4_ctx *ctx) {
   mix_seed(&ctx->core, seed, sizeof(seed));
   memset(seed, 0, sizeof(seed));
 
-  // Оновимо швидку оцінку 90B після reseed (не фатально)
+  // Оновити 90B оцінку (опційно)
   const size_t samp_len = 65536;
   unsigned char *samp = (unsigned char *)malloc(samp_len);
   if (samp) {
@@ -174,6 +174,7 @@ int re4_reseed(re4_ctx *ctx) {
 
   ctx->st.reseed_count++;
   ctx->last_reseed = time(NULL);
+  ctx->bytes_since_reseed = 0;
   return 0;
 }
 
