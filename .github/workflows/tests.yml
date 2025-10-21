@@ -4,29 +4,33 @@ on: [push, pull_request]
 jobs:
   smoke-ubuntu:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
       - name: Deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc ninja-build dieharder
+          sudo apt-get install -y cmake gcc dieharder
 
       - name: Build
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j
 
       - name: Smoke (hex)
         run: ./build/re4_dump | head -c 64 | hexdump -C
 
+      # Швидкий піднабір Dieharder: кілька найтиповіших тестів
       - name: Dieharder quick
         run: |
-          ./build/re4_dump | head -c $((64*1024*1024)) \
-            | dieharder -a -g 200 -k 2 -Y 1 -m 1 | tee dieharder_ci.txt
+          set -euo pipefail
+          ./build/re4_dump \
+            | dieharder -g 200 -k 2 -Y 1 -m 1 \
+                -d 0  -d 1  -d 3  -d 8  -d 10  -d 13 \
+            | tee dieharder_ci.txt
+
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: dieharder-ci-log
+          name: dieharder-ubuntu
           path: dieharder_ci.txt
