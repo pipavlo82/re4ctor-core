@@ -1,33 +1,35 @@
 name: tests
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   smoke-ubuntu:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc dieharder
+          sudo apt-get install -y cmake ninja-build build-essential dieharder
 
       - name: Build
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j
 
       - name: Smoke (hex)
         run: ./build/re4_dump | head -c 64 | hexdump -C
 
-      # Швидкий піднабір Dieharder: кілька найтиповіших тестів
       - name: Dieharder quick
         run: |
           set -euo pipefail
           ./build/re4_dump \
             | dieharder -g 200 -k 2 -Y 1 -m 1 \
-                -d 0  -d 1  -d 3  -d 8  -d 10  -d 13 \
+                -d 0 -d 1 -d 3 -d 8 -d 10 -d 13 \
             | tee dieharder_ci.txt
 
       - uses: actions/upload-artifact@v4
