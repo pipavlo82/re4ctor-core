@@ -23,7 +23,7 @@ void re4_free(re4_ctx *ctx);
 int re4_init(re4_ctx *ctx, const char *domain_tag);
 
 /** Reseed (PQ + класика) з причиною для логів/тегів */
-int re4_reseed(re4_ctx *ctx, const char *reason);
+int re4_reseed(re4_ctx *ctx);
 
 /** Generate n bytes; 0 = ok, <0 = error/health-stop */
 int re4_generate(re4_ctx *ctx, void *out, size_t n);
