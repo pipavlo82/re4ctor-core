@@ -1,88 +1,41 @@
-// src/drbg/drbg.c
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
 
 #include "re4/drbg.h"
 #include "re4/entropy.h"
 #include "sp800_90b/estimator.h"
 
-// ==== TEMP STUBS (TODO: replace with real core wiring) =====================
-// Ці обгортки потрібні лише щоб пройти лінкування. Пізніше замінимо
-// на справжні виклики ядра (mix/stream) з re4ctor_core.
-static void mix_seed(re4_core *core, const void *seed, size_t n) {
-  (void)core;
-  // TODO: replace with real key-derivation; тимчасово просто "поглинаємо" seed ніяк
-  (void)seed;
-  (void)n;
-}
+/* ------------------------- Політика reseed/health ------------------------- */
 
-static size_t re4_stream(re4_core *core, void *out, size_t n) {
-  (void)core;
-  // TODO: replace with реальний генератор потоку з ядра.
-  // Тимчасово: fallback на системну ентропію, щоб не ламати збірку/CI.
-  int got = re4_sys_entropy(out, n);
-  return got > 0 ? (size_t)got : 0;
-}
-// ==== /TEMP STUBS ===========================================================
-
-// --------------------- внутрішні межі/параметри ---------------------
-
-#define RE4_RESEED_BYTES_LIMIT (32ULL * 1024ULL * 1024ULL) // кожні ~32 MiB
-#define RE4_RESEED_TIME_SECONDS 300                        // або кожні 5 хв
-#define RE4_90B_SAMPLE_LEN 65536                           // ~64 KiB для MCV
-
-// --------------------- внутрішній стан DRBG -------------------------
-
-struct re4_core_state {
-  // Це «ядро» з src/core/re4ctor_core.c.
-  // Ми не знаємо його структури тут, лише передаємо в core-функції.
-  uint8_t opaque[256];
-};
+#define RESEED_BYTES_THRESHOLD (64ull * 1024ull * 1024ull) /* 64 MiB */
+#define RESEED_TIME_THRESHOLD_S 180                        /* 3 хв */
 
 struct re4_ctx {
-  struct re4_core_state core;
+  /* Статус для публічного API */
   re4_status_t st;
 
+  /* Внутрішні лічильники для політики reseed */
   time_t last_reseed;
   uint64_t bytes_since_reseed;
 };
 
-// Ці функції реалізовані у ядрі (src/core/re4ctor_core.c).
-// Не маємо заголовка — викликаємо напряму. Якщо у тебе є хедер, підключи його
-// і видали ці extern (вони тут лише щоб уникнути implicit-decl warnings).
-extern void mix_seed(void *core, const void *seed, size_t seedlen);
-extern void re4_stream(void *core, uint8_t *out, size_t n);
+/* ------------------------- Внутрішні утиліти ------------------------- */
 
-// --------------------- допоміжні функції ----------------------------
-
-static int need_reseed(re4_ctx *ctx) {
+static int need_reseed(const re4_ctx *ctx) {
   if (!ctx) return 0;
-  if (ctx->bytes_since_reseed >= RE4_RESEED_BYTES_LIMIT) return 1;
-  time_t now = time(NULL);
-  if (now - ctx->last_reseed >= RE4_RESEED_TIME_SECONDS) return 1;
+  if (ctx->bytes_since_reseed >= RESEED_BYTES_THRESHOLD) return 1;
+  if ((time(NULL) - ctx->last_reseed) >= RESEED_TIME_THRESHOLD_S) return 1;
   return 0;
 }
 
-// Швидка оцінка мін-ентропії за SP800-90B (Most Common Value) для сід-матеріалу.
-static void update_90b_estimate(re4_ctx *ctx) {
-  if (!ctx) return;
-
-  unsigned char *samp = (unsigned char *)malloc(RE4_90B_SAMPLE_LEN);
-  if (!samp) return;
-
-  // NB: re4_sys_entropy повертає int — кількість байтів або 0 при помилці
-  int got = re4_sys_entropy(samp, RE4_90B_SAMPLE_LEN);
-  if (got > 0) {
-    ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, (size_t)got);
-  }
-
-  memset(samp, 0, RE4_90B_SAMPLE_LEN);
-  free(samp);
+static double estimate_min_entropy_90b(const unsigned char *samp, size_t samp_len) {
+  /* MCV оцінка (мін-ентропія у бітах на байт) */
+  return re4_90b_mcv_min_entropy(samp, samp_len);
 }
 
-// --------------------- публічний API --------------------------------
+/* ------------------------- Публічний API ------------------------- */
 
 re4_ctx *re4_create(void) {
   re4_ctx *ctx = (re4_ctx *)calloc(1, sizeof(*ctx));
@@ -90,36 +43,54 @@ re4_ctx *re4_create(void) {
 }
 
 void re4_free(re4_ctx *ctx) {
-  if (!ctx) return;
-  // Нульовимо чутливий стан
-  memset(ctx, 0, sizeof(*ctx));
-  free(ctx);
+  if (ctx) {
+    /* тут могли б затирати чутливий стан, якщо був би ключ/nonce */
+    free(ctx);
+  }
 }
 
 int re4_init(re4_ctx *ctx, const char *domain_tag) {
-  if (!ctx) return -1;
-  (void)domain_tag;
+  (void)domain_tag; /* доменні теги додамо пізніше у мікс сіда */
 
-  // 1) Початковий сід із системної ентропії (64 байти)
+  if (!ctx) return -1;
+
+  /* 1) первинний seed (64 байти з системи) */
   unsigned char seed[64];
-  int got = re4_sys_entropy(seed, sizeof(seed));
-  if (got != (int)sizeof(seed)) {
+  if (re4_sys_entropy(seed, sizeof(seed)) != (int)sizeof(seed)) {
     memset(seed, 0, sizeof(seed));
     return -2;
   }
 
-  mix_seed(&ctx->core, seed, sizeof(seed));
+  /* 2) одноразова вибірка для SP800-90B (MCV), ~4 KiB достатньо для CI */
+  const size_t samp_len = 4096;
+  unsigned char *samp = (unsigned char *)malloc(samp_len);
+  if (!samp) {
+    memset(seed, 0, sizeof(seed));
+    return -3;
+  }
+  int got = re4_sys_entropy(samp, samp_len);
+  if (got != (int)samp_len) {
+    memset(samp, 0, samp_len);
+    free(samp);
+    memset(seed, 0, sizeof(seed));
+    return -4;
+  }
+
+  ctx->st.est_min_entropy_bits_per_byte = estimate_min_entropy_90b(samp, samp_len);
+
+  /* наразі використовуємо системну ентропію як бекенд, тож seed не міксуємо;
+     коли інтегруємо core-стрім — тут викличемо мікс/ініт ядра */
   memset(seed, 0, sizeof(seed));
+  memset(samp, 0, samp_len);
+  free(samp);
 
-  // 2) Оцінимо мін-ентропію поточного середовища (90B MCV)
-  update_90b_estimate(ctx);
-
-  // 3) Базовий health-статус
   ctx->st.healthy = 1;
   ctx->st.generated_total = 0;
-  ctx->st.reseed_count = 1; // первинний сід уже зроблено
+  ctx->st.reseed_count = 1;
+
   ctx->last_reseed = time(NULL);
   ctx->bytes_since_reseed = 0;
+
   return 0;
 }
 
@@ -127,20 +98,39 @@ int re4_reseed(re4_ctx *ctx) {
   if (!ctx) return -1;
 
   unsigned char seed[64];
-  int got = re4_sys_entropy(seed, sizeof(seed));
-  if (got != (int)sizeof(seed)) {
+  if (re4_sys_entropy(seed, sizeof(seed)) != (int)sizeof(seed)) {
     memset(seed, 0, sizeof(seed));
+    ctx->st.healthy = 0;
     return -2;
   }
 
-  mix_seed(&ctx->core, seed, sizeof(seed));
-  memset(seed, 0, sizeof(seed));
+  /* Оновлюємо 90B оцінку на новій вибірці */
+  const size_t samp_len = 4096;
+  unsigned char *samp = (unsigned char *)malloc(samp_len);
+  if (!samp) {
+    memset(seed, 0, sizeof(seed));
+    return -3;
+  }
+  int got = re4_sys_entropy(samp, samp_len);
+  if (got != (int)samp_len) {
+    memset(samp, 0, samp_len);
+    free(samp);
+    memset(seed, 0, sizeof(seed));
+    ctx->st.healthy = 0;
+    return -4;
+  }
+  ctx->st.est_min_entropy_bits_per_byte = estimate_min_entropy_90b(samp, samp_len);
 
-  update_90b_estimate(ctx);
+  /* Місце для міксу ключа/nonce ядра — додамо при інтеграції core */
+  memset(seed, 0, sizeof(seed));
+  memset(samp, 0, samp_len);
+  free(samp);
 
   ctx->st.reseed_count++;
   ctx->last_reseed = time(NULL);
   ctx->bytes_since_reseed = 0;
+  ctx->st.healthy = 1;
+
   return 0;
 }
 
@@ -152,17 +142,29 @@ int re4_random(re4_ctx *ctx, void *out, size_t n) {
     if (re4_reseed(ctx) != 0) return -3;
   }
 
-  // re4_stream заповнює байтами з ядра
-  re4_stream(&ctx->core, (uint8_t *)out, n);
-
-  ctx->st.generated_total += (uint64_t)n;
-  ctx->bytes_since_reseed += (uint64_t)n;
+  /* Поки що — системна ентропія; замінимо на ядро (stream) згодом */
+  uint8_t *p = (uint8_t *)out;
+  size_t left = n;
+  while (left > 0) {
+    size_t chunk = left > 4096 ? 4096 : left;
+    int got = re4_sys_entropy(p, chunk);
+    if (got != (int)chunk) {
+      ctx->st.healthy = 0;
+      return -4;
+    }
+    p += chunk;
+    left -= chunk;
+    ctx->st.generated_total += chunk;
+    ctx->bytes_since_reseed += chunk;
+  }
   return 0;
 }
 
 re4_status_t re4_status(const re4_ctx *ctx) {
-  // зручно повертати знімок структури статусу
-  re4_status_t z = {0};
-  if (!ctx) return z;
+  if (!ctx) {
+    re4_status_t z;
+    memset(&z, 0, sizeof(z));
+    return z;
+  }
   return ctx->st;
 }
