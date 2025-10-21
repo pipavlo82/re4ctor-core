@@ -118,7 +118,7 @@ int re4_init(re4_ctx *ctx, const char *tag) {
   /* SP800-90B MCV on a fresh sample */
   unsigned char samp[65536];
   re4_sys_entropy(samp, sizeof(samp));
-  ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, sizeof(samp));
+  ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len);
   memset(samp, 0, sizeof(samp));
 
   ctx->st.healthy = 1;
@@ -159,7 +159,7 @@ int re4_reseed(re4_ctx *ctx) {
   uint8_t *samp = (uint8_t *)malloc(samp_len);
   if (samp) {
     re4_sys_entropy(samp, samp_len);
-    ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len, 0, samp_len);
+    ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len);
     memset(samp, 0, samp_len);
     free(samp);
   } else {

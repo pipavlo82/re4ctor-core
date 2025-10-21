@@ -93,10 +93,227 @@ int re4_hw_rdseed(uint64_t *out) {
 #endif
 }
 
-int re4_sys_entropy(uint8_t *dst, size_t n) {
-  if (!dst || n == 0) return -1;
-  size_t got = re4_sys_entropy_impl(dst, n);
-  if (got == 0) return -1;
-  if (got > INT_MAX) got = INT_MAX;
-  return (int)got;
+size_t re4_sys_entropy(void *buf, size_t n) {
+  if (!buf || n == 0) return 0;
+
+  uint8_t *dst = (uint8_t *)buf;
+  size_t wrote = 0;
+
+  /* 1) Основне джерело — /dev/urandom */
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    while (wrote < n) {
+      ssize_t r = read(fd, dst + wrote, n - wrote);
+      if (r <= 0) break;
+      wrote += (size_t)r;
+    }
+    close(fd);
+  }
+
+  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
+#if defined(__x86_64__) || defined(_M_X64)
+  uint64_t x;
+  while (wrote + sizeof(x) <= n) {
+    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
+      memcpy(dst + wrote, &x, sizeof(x));
+      wrote += sizeof(x);
+    } else {
+      break;
+    }
+  }
+#endif
+
+  return wrote;
+}
+size_t re4_sys_entropy(void *buf, size_t n) {
+  if (!buf || n == 0) return 0;
+
+  uint8_t *dst = (uint8_t *)buf;
+  size_t wrote = 0;
+
+  /* 1) Основне джерело — /dev/urandom */
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    while (wrote < n) {
+      ssize_t r = read(fd, dst + wrote, n - wrote);
+      if (r <= 0) break;
+      wrote += (size_t)r;
+    }
+    close(fd);
+  }
+
+  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
+#if defined(__x86_64__) || defined(_M_X64)
+  uint64_t x;
+  while (wrote + sizeof(x) <= n) {
+    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
+      memcpy(dst + wrote, &x, sizeof(x));
+      wrote += sizeof(x);
+    } else {
+      break;
+    }
+  }
+#endif
+
+  return wrote;
+}
+size_t re4_sys_entropy(void *buf, size_t n) {
+  if (!buf || n == 0) return 0;
+
+  uint8_t *dst = (uint8_t *)buf;
+  size_t wrote = 0;
+
+  /* 1) Основне джерело — /dev/urandom */
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    while (wrote < n) {
+      ssize_t r = read(fd, dst + wrote, n - wrote);
+      if (r <= 0) break;
+      wrote += (size_t)r;
+    }
+    close(fd);
+  }
+
+  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
+#if defined(__x86_64__) || defined(_M_X64)
+  uint64_t x;
+  while (wrote + sizeof(x) <= n) {
+    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
+      memcpy(dst + wrote, &x, sizeof(x));
+      wrote += sizeof(x);
+    } else {
+      break;
+    }
+  }
+#endif
+
+  return wrote;
+}
+size_t re4_sys_entropy(void *buf, size_t n) {
+  if (!buf || n == 0) return 0;
+
+  uint8_t *dst = (uint8_t *)buf;
+  size_t wrote = 0;
+
+  /* 1) Основне джерело — /dev/urandom */
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    while (wrote < n) {
+      ssize_t r = read(fd, dst + wrote, n - wrote);
+      if (r <= 0) break;
+      wrote += (size_t)r;
+    }
+    close(fd);
+  }
+
+  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
+#if defined(__x86_64__) || defined(_M_X64)
+  uint64_t x;
+  while (wrote + sizeof(x) <= n) {
+    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
+      memcpy(dst + wrote, &x, sizeof(x));
+      wrote += sizeof(x);
+    } else {
+      break;
+    }
+  }
+#endif
+
+  return wrote;
+}
+size_t re4_sys_entropy(void *buf, size_t n) {
+  if (!buf || n == 0) return 0;
+
+  uint8_t *dst = (uint8_t *)buf;
+  size_t wrote = 0;
+
+  /* 1) Основне джерело — /dev/urandom */
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    while (wrote < n) {
+      ssize_t r = read(fd, dst + wrote, n - wrote);
+      if (r <= 0) break;
+      wrote += (size_t)r;
+    }
+    close(fd);
+  }
+
+  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
+#if defined(__x86_64__) || defined(_M_X64)
+  uint64_t x;
+  while (wrote + sizeof(x) <= n) {
+    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
+      memcpy(dst + wrote, &x, sizeof(x));
+      wrote += sizeof(x);
+    } else {
+      break;
+    }
+  }
+#endif
+
+  return wrote;
+}
+size_t re4_sys_entropy(void *buf, size_t n) {
+  if (!buf || n == 0) return 0;
+
+  uint8_t *dst = (uint8_t *)buf;
+  size_t wrote = 0;
+
+  /* 1) Основне джерело — /dev/urandom */
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    while (wrote < n) {
+      ssize_t r = read(fd, dst + wrote, n - wrote);
+      if (r <= 0) break;
+      wrote += (size_t)r;
+    }
+    close(fd);
+  }
+
+  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
+#if defined(__x86_64__) || defined(_M_X64)
+  uint64_t x;
+  while (wrote + sizeof(x) <= n) {
+    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
+      memcpy(dst + wrote, &x, sizeof(x));
+      wrote += sizeof(x);
+    } else {
+      break;
+    }
+  }
+#endif
+
+  return wrote;
+}
+size_t re4_sys_entropy(void *buf, size_t n) {
+  if (!buf || n == 0) return 0;
+
+  uint8_t *dst = (uint8_t *)buf;
+  size_t wrote = 0;
+
+  /* 1) Основне джерело — /dev/urandom */
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    while (wrote < n) {
+      ssize_t r = read(fd, dst + wrote, n - wrote);
+      if (r <= 0) break;
+      wrote += (size_t)r;
+    }
+    close(fd);
+  }
+
+  /* 2) (Опційно) добираємо з RDRAND/RDSEED, якщо доступно на x86_64 */
+#if defined(__x86_64__) || defined(_M_X64)
+  uint64_t x;
+  while (wrote + sizeof(x) <= n) {
+    if (re4_hw_rdseed(&x) || re4_hw_rdrand(&x)) {
+      memcpy(dst + wrote, &x, sizeof(x));
+      wrote += sizeof(x);
+    } else {
+      break;
+    }
+  }
+#endif
+
+  return wrote;
 }
