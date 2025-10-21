@@ -92,41 +92,50 @@ void re4_free(re4_ctx *ctx) {
   }
 }
 
-int re4_init(re4_ctx *ctx, const char *tag) {
+int re4_init(re4_ctx *ctx, const char *domain_tag) {
   if (!ctx) return -1;
-  policy_init(ctx);
+  memset(ctx, 0, sizeof(*ctx));
+  (void)domain_tag;
 
   unsigned char seed[64];
-  size_t got = re4_sys_entropy(seed, sizeof(seed));
-  if (got != sizeof(seed)) return -2;
+  int got = re4_sys_entropy(seed, sizeof(seed));
+  if (got != (int)sizeof(seed)) return -2;
 
-  /* optional: blend RDRAND */
-  uint64_t rx;
-  if (re4_hw_rdrand(&rx)) memcpy(seed, &rx, sizeof(rx));
-
-  memset(&ctx->core, 0, sizeof(ctx->core));
   mix_seed(&ctx->core, seed, sizeof(seed));
   memset(seed, 0, sizeof(seed));
 
-  if (tag) {
-    size_t L = strlen(tag);
-    if (L > sizeof(ctx->tag) - 1) L = sizeof(ctx->tag) - 1;
-    memcpy(ctx->tag, tag, L);
-    ctx->tag[L] = 0;
+  // Швидка оцінка SP800-90B MCV на старті
+  const size_t samp_len = 65536;
+  unsigned char *samp = (unsigned char *)malloc(samp_len);
+  if (samp) {
+    int g2 = re4_sys_entropy(samp, samp_len);
+    if (g2 > 0) {
+      // використовуємо фактично отриману довжину
+      ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, (size_t)g2);
+    }
+    memset(samp, 0, samp_len);
+    free(samp);
   }
-
-  /* SP800-90B MCV on a fresh sample */
-  unsigned char samp[65536];
-  re4_sys_entropy(samp, sizeof(samp));
-  ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len);
-  memset(samp, 0, sizeof(samp));
 
   ctx->st.healthy = 1;
   ctx->st.generated_total = 0;
-  ctx->st.reseed_count = 1;
+  ctx->st.reseed_count = 1; // ініціальний сид уже був
   ctx->last_reseed = time(NULL);
-  ctx->bytes_since_reseed = 0;
   return 0;
+}
+
+/* SP800-90B MCV on a fresh sample */
+unsigned char samp[65536];
+re4_sys_entropy(samp, sizeof(samp));
+ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len);
+memset(samp, 0, sizeof(samp));
+
+ctx->st.healthy = 1;
+ctx->st.generated_total = 0;
+ctx->st.reseed_count = 1;
+ctx->last_reseed = time(NULL);
+ctx->bytes_since_reseed = 0;
+return 0;
 }
 
 int re4_add_entropy(re4_ctx *ctx, const void *buf, size_t n) {
@@ -151,13 +160,13 @@ int re4_reseed(re4_ctx *ctx) {
   mix_seed(&ctx->core, seed, sizeof(seed));
   memset(seed, 0, sizeof(seed));
 
-  // quick 90B update after reseed (non-fatal)
+  // Оновимо швидку оцінку 90B після reseed (не фатально)
   const size_t samp_len = 65536;
   unsigned char *samp = (unsigned char *)malloc(samp_len);
   if (samp) {
     int g2 = re4_sys_entropy(samp, samp_len);
     if (g2 > 0) {
-      ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, samp_len);
+      ctx->st.est_min_entropy_bits_per_byte = re4_90b_mcv_min_entropy(samp, (size_t)g2);
     }
     memset(samp, 0, samp_len);
     free(samp);
