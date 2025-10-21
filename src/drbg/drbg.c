@@ -141,7 +141,7 @@ int re4_random(re4_ctx *ctx, void *out, size_t n) {
   return 0;
 }
 
-re4_status_t re4_status(re4_ctx *ctx) {
+re4_status_t re4_status(const re4_ctx *ctx) {
   // зручно повертати знімок структури статусу
   re4_status_t z = {0};
   if (!ctx) return z;
