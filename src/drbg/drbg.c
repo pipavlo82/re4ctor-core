@@ -8,6 +8,25 @@
 #include "re4/entropy.h"
 #include "sp800_90b/estimator.h"
 
+// ==== TEMP STUBS (TODO: replace with real core wiring) =====================
+// Ці обгортки потрібні лише щоб пройти лінкування. Пізніше замінимо
+// на справжні виклики ядра (mix/stream) з re4ctor_core.
+static void mix_seed(re4_core *core, const void *seed, size_t n) {
+  (void)core;
+  // TODO: replace with real key-derivation; тимчасово просто "поглинаємо" seed ніяк
+  (void)seed;
+  (void)n;
+}
+
+static size_t re4_stream(re4_core *core, void *out, size_t n) {
+  (void)core;
+  // TODO: replace with реальний генератор потоку з ядра.
+  // Тимчасово: fallback на системну ентропію, щоб не ламати збірку/CI.
+  int got = re4_sys_entropy(out, n);
+  return got > 0 ? (size_t)got : 0;
+}
+// ==== /TEMP STUBS ===========================================================
+
 // --------------------- внутрішні межі/параметри ---------------------
 
 #define RE4_RESEED_BYTES_LIMIT (32ULL * 1024ULL * 1024ULL) // кожні ~32 MiB
