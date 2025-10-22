@@ -37,10 +37,16 @@ jobs:
         continue-on-error: true
 
       # --- PractRand (збирання та 256MB тест) ---
-      - name: Build PractRand
-        run: |
-          git clone --depth=1 https://github.com/imneme/PractRand.git PractRand
-          make -C PractRand/build/Linux -j2
+      - name: Fetch PractRand
+      uses: actions/checkout@v4
+      with:
+        repository: imneme/PractRand
+        path: PractRand
+        fetch-depth: 1
+        ref: master
+
+    - name: Build PractRand
+      run: make -C PractRand/build/Linux -j2
       - name: PractRand 256MB
         run: |
           mkdir -p proof
