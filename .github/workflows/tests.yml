@@ -32,26 +32,25 @@ jobs:
       - name: Dieharder quick
         run: ./build/re4_dump | dieharder -a -g 200 -k 2 -Y 1 -m 1 | tee dieharder_ci.txt
 
-      # ---- PractRand (через tarball, без автентифікації) ----
+       # ----- PractRand (через tarball, без автентифікації) -----
       - name: Fetch PractRand
         run: |
-        set -euxo pipefail
-        mkdir -p external
-     # качаємо архів з правильного endpoint'а
+         set -euxo pipefail
+         mkdir -p external
+        # качаємо архів з правильного endpoint'а
         curl -L https://github.com/imneme/PractRand/archive/refs/heads/master.tar.gz -o /tmp/PractRand.tar.gz
-    # переконуємось, що файл не порожній
+        # переконуємось, що файл не порожній
         test -s /tmp/PractRand.tar.gz
         tar -xzf /tmp/PractRand.tar.gz -C external
         mv external/PractRand-master external/PractRand
 
-      - name: Build PractRand
-         run: make -C external/PractRand/build/Linux -j2
+     - name: Build PractRand
+       run: make -C external/PractRand/build/Linux -j2
 
-      - name: PractRand 256MB
-         run: |
-         set +e
-         ./build/re4_dump | external/PractRand/build/Linux/RNG_test stdin64 -tf 2 -te 256MB
-         exit 0
-
+    - name: PractRand 256MB
+      run: |
+        set +e
+        ./build/re4_dump | external/PractRand/build/Linux/RNG_test stdin64 -tf 2 -te 256MB
+        exit 0
 
 
