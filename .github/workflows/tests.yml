@@ -30,18 +30,19 @@ jobs:
       - name: Dieharder quick
         run: ./build/re4_dump | dieharder -a -g 200 -k 2 -Y 1 -m 1 | tee dieharder_ci.txt
 
-     # ----- PractRand -----
-- name: Fetch PractRand
-  uses: actions/checkout@v4
-  with:
-    repository: dieharder-rng/PractRand     # робоче дзеркало
-    ref: master
-    fetch-depth: 1
-    path: external/PractRand
-    token: ${{ github.token }}              # вбудований токен GitHub Actions
+         # ----- PractRand -----
+      - name: Fetch PractRand
+        uses: actions/checkout@v4
+        with:
+          repository: dieharder-rng/PractRand
+          ref: master
+          fetch-depth: 1
+          path: external/PractRand
 
-- name: Build PractRand
-  run: make -C external/PractRand/build/Linux -j2
+      - name: Build PractRand
+        run: |
+          make -C external/PractRand/build/Linux -j2
 
-- name: PractRand 256MB
-  run: ./build/re4_dump | external/PractRand/build/Linux/RNG_test stdin64 -tf 2 -te 256MB
+      - name: PractRand 256MB
+        run: |
+          ./build/re4_dump | external/PractRand/build/Linux/RNG_test stdin64 -tf 2 -te 256MB
