@@ -37,13 +37,14 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p external
-          # качаємо архів з правильного endpoint'а
-          curl -L https://github.com/imneme/PractRand/archive/refs/heads/master.tar.gz -o /tmp/PractRand.tar.gz
-          # переконуємось, що файл не порожній
+          # codeload віддає справжній tar.gz; у PractRand актуальна гілка 'dev'
+          curl -L https://codeload.github.com/imneme/PractRand/tar.gz/refs/heads/dev \
+            -o /tmp/PractRand.tar.gz
           test -s /tmp/PractRand.tar.gz
           tar -xzf /tmp/PractRand.tar.gz -C external
-          mv external/PractRand-master external/PractRand
-
+          # знайти розпаковану теку PractRand-* і перейменувати в external/PractRand
+          PR_DIR=$(tar -tzf /tmp/PractRand.tar.gz | head -1 | cut -d/ -f1)
+          mv "external/${PR_DIR}" external/PractRand
       - name: Build PractRand
         run: make -C external/PractRand/build/Linux -j2
 
