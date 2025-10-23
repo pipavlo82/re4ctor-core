@@ -15,20 +15,18 @@ typedef struct {
 
 typedef struct re4_ctx re4_ctx;
 
-/** Create / destroy **/
+/* Lifecycle */
 re4_ctx *re4_create(void);
 void re4_free(re4_ctx *ctx);
 
-/** Init from system entropy (urandom + optional RDRAND/jitter later) */
+/* Init / reseed */
 int re4_init(re4_ctx *ctx, const char *domain_tag);
-
-/** Reseed (PQ + класика) з причиною для логів/тегів */
 int re4_reseed(re4_ctx *ctx);
 
-/** Generate n bytes; 0 = ok, <0 = error/health-stop */
-int re4_generate(re4_ctx *ctx, void *out, size_t n);
+/* Generate random bytes */
+int re4_random(re4_ctx *ctx, void *out, size_t n);
 
-/** Snapshot health/metrics */
+/* Status (const-correct) */
 re4_status_t re4_status(const re4_ctx *ctx);
 
 #ifdef __cplusplus
