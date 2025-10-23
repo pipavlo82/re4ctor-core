@@ -5,7 +5,7 @@
 
 #include "re4/drbg.h"
 #include "re4/entropy.h"
-#include "sp800_90b/estimator.h"
+#include "../sp800_90b/estimator.h"
 
 /* ------------------------- Політика reseed/health ------------------------- */
 

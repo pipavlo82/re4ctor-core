@@ -46,7 +46,11 @@ int re4_hw_rdseed(uint64_t *out) {
 static size_t re4_sys_entropy_impl(void *buf, size_t n) {
   if (!buf || n == 0) return 0;
 
-  int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+  int fd = open("/dev/urandom", flags);
   if (fd < 0) return 0;
 
   uint8_t *p = (uint8_t *)buf;
