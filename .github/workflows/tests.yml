@@ -15,60 +15,39 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deps
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake gcc g++ make \
-            dieharder util-linux curl file tar
+            dieharder util-linux curl file tar \
+            practrand
 
       - name: Build
+        shell: bash
         run: |
+          set -euo pipefail
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
 
       - name: Smoke (hex)
+        shell: bash
         run: |
+          set -euo pipefail
           ./build/re4_dump | head -c 32 | hexdump -C
 
       - name: Dieharder quick
-        run: |
-          ./build/re4_dump | dieharder -a -g 200 -k 2 -Y 1 -m 1 | tee dieharder_ci.txt
-
-      # ----- PractRand (через tarball, без автентифікації) -----
-      - name: Fetch PractRand
         shell: bash
         run: |
-          set -euxo pipefail
-          mkdir -p external
-          TMP=/tmp/PractRand.tar.gz
+          set -euo pipefail
+          ./build/re4_dump | dieharder -a -g 200 -k 2 -Y 1 -m 1 | tee dieharder_ci.txt
 
-          # пробуємо master, потім dev; качаємо лише з codeload (повертає справжній .tar.gz)
-          for BR in master dev; do
-            URL="https://codeload.github.com/imneme/PractRand/tar.gz/refs/heads/${BR}"
-            echo "Trying $URL"
-            if curl -fsSL --retry 5 --retry-delay 2 -o "$TMP" "$URL"; then
-              # перевіряємо, що це gzip-архів, а не HTML 404
-              if file "$TMP" | grep -qi 'gzip'; then
-                ROOT_DIR="$(tar -tzf "$TMP" | head -1 | cut -d/ -f1)"
-                tar -xzf "$TMP" -C external
-                mv "external/$ROOT_DIR" external/PractRand
-                echo "PractRand fetched from branch: $BR"
-                exit 0
-              fi
-            fi
-          done
-
-          echo "::error ::Could not fetch PractRand tarball (tried master, dev)"
-          exit 1
-
-      - name: Build PractRand
-        run: |
-          make -C external/PractRand/build/Linux -j"$(nproc)"
-
+      # PractRand без клонування/збирання — використовуємо пакет з Ubuntu
       - name: PractRand 256MB
         shell: bash
         run: |
-          set +e
-          ./build/re4_dump | external/PractRand/build/Linux/RNG_test stdin64 -tf 2 -te 256MB
           # не валимо джобу, навіть якщо тест впаде або вичерпає таймаут
+          set +e
+          ./build/re4_dump | RNG_test stdin64 -tf 2 -te 256MB
           exit 0
