@@ -25,9 +25,11 @@ add_executable(re4_dump
 )
 target_link_libraries(re4_dump PRIVATE re4ctor_core m)
 
-# Увімкнути RDRAND/RDSEED лише для entropy.c (x86)
-set_source_files_properties(src/entropy/entropy.c
-  PROPERTIES COMPILE_FLAGS "-mrdrnd -mrdseed")
+# Увімкнути RDRAND/RDSEED лише на Linux x86_64 (не на macOS)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  set_source_files_properties(src/entropy/entropy.c
+    PROPERTIES COMPILE_FLAGS "-mrdrnd -mrdseed")
+endif()
 
 # ---------- Тести ----------
 enable_testing()
