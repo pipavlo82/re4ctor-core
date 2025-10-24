@@ -218,3 +218,161 @@ Optional: PractRand / dieharder statistical tests
 ✅ re4ctor-core → generates true entropy bytes (C)
 ✅ re4ctor-api → REST interface with key auth & rate limit
 ✅ Runs as systemd service on port 8080
+
+# re4ctor-core (public drop)
+
+This repo publishes:
+- a minimal RNG binary (`re4_dump`) built from a private core,
+- a test harness and CI proof,
+- an HTTP API wrapper (FastAPI + systemd),
+- SBOM and signed release bundles.
+
+What is intentionally **not** published:
+- the low-level DRBG/entropy core implementation in `src/`
+- internal health/entropy logic
+- reproducible seed path / heuristics
+
+The model is similar to Apple Secure Enclave / Intel SGX:
+you can call it, you can test it, but you don't get the guts.
+
+## How to build locally (WSL / Ubuntu)
+
+```bash
+# clone this repo
+cd re4ctor-core
+
+# configure + build
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+
+# run smoke test
+./build/re4_dump | head -c 32 | hexdump -C
+You should see different hex on every run.
+
+Basic self-tests
+bash
+Copy code
+cd build
+ctest --output-on-failure
+This runs a tiny re4_tests binary that:
+
+initializes the generator,
+
+pulls 32 bytes twice,
+
+checks they are not all-zero and not identical.
+
+CI also runs:
+
+dieharder on the stream
+
+PractRand on stdin64 (short mode for GitHub Action runtime limits)
+
+SBOM / Release bundle
+We generate an SBOM (SPDX 2.3) from only what we ship:
+
+bash
+Copy code
+syft packages dir:release -o spdx-json > release/SBOM.spdx.json
+Then we pack + sign:
+
+bash
+Copy code
+tar -C release -czf re4_release.tar.gz .
+sha256sum re4_release.tar.gz > re4_release.sha256
+gpg --armor --detach-sign re4_release.tar.gz  # -> re4_release.tar.gz.asc
+Deliverables:
+
+re4_release.tar.gz : binaries + helper scripts + SBOM
+
+re4_release.sha256 : hash for integrity
+
+re4_release.tar.gz.asc : detached GPG signature
+
+Consumers verify:
+
+bash
+Copy code
+sha256sum -c re4_release.sha256
+gpg --verify re4_release.tar.gz.asc re4_release.tar.gz
+If both pass, they got exactly what we built.
+
+API service
+There's a small FastAPI app (re4ctor-api) that exposes:
+
+GET /health → "ok"
+
+GET /version → build info + git rev
+
+GET /info → usage help
+
+GET /random → random bytes, requires API key
+
+Auth:
+
+header: x-api-key: <KEY>
+
+or query: ?key=<KEY>
+
+Example (hex):
+
+bash
+Copy code
+curl -s -H "x-api-key: change-me" \
+  "http://127.0.0.1:8080/random?n=16&fmt=hex"
+Example (raw bytes -> hexdump):
+
+bash
+Copy code
+curl -s -H "x-api-key: change-me" \
+  "http://127.0.0.1:8080/random?n=64" \
+  | hexdump -C
+Rate limiting:
+
+default 10/second per client IP
+
+max 1,000,000 bytes per request
+
+systemd unit (simplified):
+ini
+Copy code
+[Service]
+WorkingDirectory=/home/pavlo/re4ctor-api
+EnvironmentFile=/home/pavlo/re4ctor-api/.env
+ExecStart=/home/pavlo/re4ctor-api/.venv/bin/uvicorn main:app \
+  --host ${API_HOST} --port ${API_PORT} --workers 2
+Restart=on-failure
+User=pavlo
+Group=pavlo
+.env looks like:
+
+bash
+Copy code
+API_HOST=0.0.0.0
+API_PORT=8080
+API_KEY=change-me
+API_GIT=my-lab-tag
+We expose core_git (commit of generator core) and api_git
+(commit/tag for the API) via /version.
+
+Threat model
+We intentionally do not publish src/entropy/*.c, src/drbg/*.c,
+or other internals. The shipped binary is treated like a hardware RNG:
+
+You can audit behavior via statistical suites (dieharder, PractRand).
+
+You can continuously poll /random and monitor.
+
+You cannot trivially clone the core logic.
+
+This gives:
+
+Transparency of output quality.
+
+Traceability (hash/sig/SBOM).
+
+Controlled IP leakage (the "secret sauce" is not open).
+
+In other words:
+we prove the tap water is clean, without giving you the plumbing diagram.
+
