@@ -220,6 +220,7 @@ Optional: PractRand / dieharder statistical tests
 ✅ Runs as systemd service on port 8080
 
 # re4ctor-core (public drop)
+
 ## Quick Verify
 
 Download and verify the release in 2 commands:
@@ -227,7 +228,14 @@ Download and verify the release in 2 commands:
 ```bash
 sha256sum -c re4_release.sha256
 gpg --verify re4_release.tar.gz.asc re4_release.tar.gz
+```
+
 If both pass — you have exactly what we built.
+
+---
+
+## Overview
+
 This repo publishes:
 - a minimal RNG binary (`re4_dump`) built from a private core,
 - a test harness and CI proof,
@@ -242,6 +250,8 @@ What is intentionally **not** published:
 The model is similar to Apple Secure Enclave / Intel SGX:
 you can call it, you can test it, but you don't get the guts.
 
+---
+
 ## How to build locally (WSL / Ubuntu)
 
 ```bash
@@ -254,91 +264,97 @@ cmake --build build -j"$(nproc)"
 
 # run smoke test
 ./build/re4_dump | head -c 32 | hexdump -C
+```
+
 You should see different hex on every run.
 
-Basic self-tests
-bash
-Copy code
+---
+
+## Basic self-tests
+
+```bash
 cd build
 ctest --output-on-failure
-This runs a tiny re4_tests binary that:
+```
 
-initializes the generator,
+This runs a tiny `re4_tests` binary that:
 
-pulls 32 bytes twice,
-
-checks they are not all-zero and not identical.
+- initializes the generator,
+- pulls 32 bytes twice,
+- checks they are not all-zero and not identical.
 
 CI also runs:
+- `dieharder` on the stream
+- `PractRand` on stdin64 (short mode for GitHub Action runtime limits)
 
-dieharder on the stream
+---
 
-PractRand on stdin64 (short mode for GitHub Action runtime limits)
+## SBOM / Release bundle
 
-SBOM / Release bundle
 We generate an SBOM (SPDX 2.3) from only what we ship:
 
-bash
-Copy code
+```bash
 syft packages dir:release -o spdx-json > release/SBOM.spdx.json
+```
+
 Then we pack + sign:
 
-bash
-Copy code
+```bash
 tar -C release -czf re4_release.tar.gz .
 sha256sum re4_release.tar.gz > re4_release.sha256
 gpg --armor --detach-sign re4_release.tar.gz  # -> re4_release.tar.gz.asc
+```
+
 Deliverables:
 
-re4_release.tar.gz : binaries + helper scripts + SBOM
-
-re4_release.sha256 : hash for integrity
-
-re4_release.tar.gz.asc : detached GPG signature
+- `re4_release.tar.gz` : binaries + helper scripts + SBOM  
+- `re4_release.sha256` : hash for integrity  
+- `re4_release.tar.gz.asc` : detached GPG signature  
 
 Consumers verify:
 
-bash
-Copy code
+```bash
 sha256sum -c re4_release.sha256
 gpg --verify re4_release.tar.gz.asc re4_release.tar.gz
+```
+
 If both pass, they got exactly what we built.
 
-API service
-There's a small FastAPI app (re4ctor-api) that exposes:
+---
 
-GET /health → "ok"
+## API service
 
-GET /version → build info + git rev
+There's a small FastAPI app (`re4ctor-api`) that exposes:
 
-GET /info → usage help
-
-GET /random → random bytes, requires API key
+- `GET /health` → `"ok"`
+- `GET /version` → build info + git rev
+- `GET /info` → usage help
+- `GET /random` → random bytes, requires API key
 
 Auth:
-
-header: x-api-key: <KEY>
-
-or query: ?key=<KEY>
+- header: `x-api-key: <KEY>`
+- or query: `?key=<KEY>`
 
 Example (hex):
 
-bash
-Copy code
+```bash
 curl -s -H "x-api-key: change-me" \
   "http://127.0.0.1:8080/random?n=16&fmt=hex"
-Example (raw bytes -> hexdump):
+```
 
-bash
-Copy code
+Example (raw bytes → hexdump):
+
+```bash
 curl -s -H "x-api-key: change-me" \
-  "http://127.0.0.1:8080/random?n=64" \
-  | hexdump -C
+  "http://127.0.0.1:8080/random?n=64" | hexdump -C
+```
+
 Rate limiting:
+- default 10/second per client IP
+- max 1,000,000 bytes per request
 
-default 10/second per client IP
+---
 
-max 1,000,000 bytes per request
 ### systemd unit (simplified)
 
 ```ini
@@ -350,6 +366,7 @@ ExecStart=/home/pavlo/re4ctor-api/.venv/bin/uvicorn main:app \
 Restart=on-failure
 User=pavlo
 Group=pavlo
+```
 
 `.env` looks like:
 
@@ -358,28 +375,27 @@ API_HOST=0.0.0.0
 API_PORT=8080
 API_KEY=change-me
 API_GIT=my-lab-tag
+```
 
-We expose core_git (commit of generator core) and api_git
-(commit/tag for the API) via /version.
+We expose `core_git` (commit of generator core) and `api_git`
+(commit/tag for the API) via `/version`.
 
-Threat model
-We intentionally do not publish src/entropy/*.c, src/drbg/*.c,
+---
+
+## Threat model
+
+We intentionally do not publish `src/entropy/*.c`, `src/drbg/*.c`,
 or other internals. The shipped binary is treated like a hardware RNG:
 
-You can audit behavior via statistical suites (dieharder, PractRand).
-
-You can continuously poll /random and monitor.
-
-You cannot trivially clone the core logic.
+- You can audit behavior via statistical suites (`dieharder`, `PractRand`).
+- You can continuously poll `/random` and monitor.
+- You cannot trivially clone the core logic.
 
 This gives:
 
-Transparency of output quality.
+- Transparency of output quality.
+- Traceability (hash/sig/SBOM).
+- Controlled IP leakage (the "secret sauce" is not open).
 
-Traceability (hash/sig/SBOM).
-
-Controlled IP leakage (the "secret sauce" is not open).
-
-In other words:
-we prove the tap water is clean, without giving you the plumbing diagram.
-
+In other words:  
+**we prove the tap water is clean, without giving you the plumbing diagram.**
