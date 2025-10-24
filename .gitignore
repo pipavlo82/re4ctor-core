@@ -12,3 +12,10 @@ __pycache__/
 # Editor temp files
 *.swp
 *.swo
+
+# ignore raw proof blobs locally
+proof/*.bin
+proof/*_full_*.txt
+proof/*_manual*.txt
+proof/*_20*.txt
+proof/in.bin
