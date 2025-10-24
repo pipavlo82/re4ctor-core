@@ -59,7 +59,6 @@ docs/re4ctor-api.service.example
 | Build matrix | ![build-matrix](https://github.com/pipavlo82/re4ctor-core/actions/workflows/build-matrix.yml/badge.svg?branch=main) | [latest runs](https://github.com/pipavlo82/re4ctor-core/actions/workflows/build-matrix.yml?query=branch%3Amain) |
 | Tests (Ubuntu smoke) | ![tests](https://github.com/pipavlo82/re4ctor-core/actions/workflows/tests.yml/badge.svg?branch=main) | [latest runs](https://github.com/pipavlo82/re4ctor-core/actions/workflows/tests.yml?query=branch%3Amain) · artifacts: `dieharder_ci.txt`, `RNG_test.log` |
 
-> **Note.** Логи тестів (Dieharder, PractRand) прикріплюються як *Artifacts* на сторінці відповідного run’а.
 
 RE4CTOR Core & API
 
