@@ -15,3 +15,206 @@
 | Tests (Ubuntu smoke) | ![tests](https://github.com/pipavlo82/re4ctor-core/actions/workflows/tests.yml/badge.svg?branch=main) | [latest runs](https://github.com/pipavlo82/re4ctor-core/actions/workflows/tests.yml?query=branch%3Amain) · artifacts: `dieharder_ci.txt`, `RNG_test.log` |
 
 > **Note.** Логи тестів (Dieharder, PractRand) прикріплюються як *Artifacts* на сторінці відповідного run’а.
+
+RE4CTOR Core & API
+
+RE4CTOR Core is a minimal, deterministic, high-entropy byte generator (DRBG + system entropy + SP800-90B minimal entropy layer).
+RE4CTOR API is an HTTP service built on top of re4ctor-core, providing cryptographically secure random bytes via REST API.
+
+1️⃣ Build RE4CTOR Core
+Dependencies
+sudo apt update
+sudo apt install -y build-essential cmake ninja-build
+
+Build & Test
+cd ~/re4ctor-core
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure
+
+
+Executables:
+
+build/re4_dump — infinite stream of random bytes
+
+build/re4_tests — internal DRBG self-tests
+
+Quick check:
+
+./build/re4_dump | head -c 32 | hexdump -C
+
+
+Example output (always different):
+
+00000000  91 c1 a3 e0 3d ca 91 b9  58 86 a0 81 a6 91 84 f1  |....=...X.......|
+
+2️⃣ RE4CTOR API (FastAPI + uvicorn)
+Folder layout
+/home/pavlo/re4ctor-api/main.py        # FastAPI app
+/home/pavlo/re4ctor-api/.venv/         # Python virtual env
+/home/pavlo/re4ctor-core/build/re4_dump # Core backend binary
+/etc/systemd/system/re4ctor-api.service # Systemd service
+
+2.1 Virtual environment setup
+cd ~/re4ctor-api
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+
+requirements.txt
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+slowapi==0.1.9
+python-dotenv==1.0.1
+pydantic==2.9.2
+
+2.2 Environment config
+
+Create or edit:
+
+nano /home/pavlo/re4ctor-api/.env
+
+
+Add:
+
+API_HOST=0.0.0.0
+API_PORT=8080
+API_KEY=change-me
+API_GIT=pavlo-lab
+
+2.3 Dev mode run
+cd ~/re4ctor-api
+source .venv/bin/activate
+API_KEY=change-me uvicorn main:app --host 0.0.0.0 --port 8080 --workers 2
+
+2.4 Systemd service (production)
+
+File /etc/systemd/system/re4ctor-api.service
+
+[Unit]
+Description=RE4CTOR API service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/pavlo/re4ctor-api
+EnvironmentFile=/home/pavlo/re4ctor-api/.env
+User=pavlo
+Group=pavlo
+ExecStart=/home/pavlo/re4ctor-api/.venv/bin/uvicorn main:app \
+    --host ${API_HOST} \
+    --port ${API_PORT} \
+    --workers 2
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+
+
+Enable and start:
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now re4ctor-api
+systemctl status re4ctor-api --no-pager
+
+
+Logs:
+
+journalctl -u re4ctor-api -f
+
+3️⃣ HTTP API Reference
+Public Endpoints
+
+GET /health
+→ returns "ok"
+
+GET /version
+Example:
+
+{
+  "name": "re4ctor-api",
+  "version": "0.1.0",
+  "api_git": "pavlo-lab",
+  "core_git": "91b1494",
+  "limits": {
+    "max_bytes_per_request": 1000000,
+    "rate_limit": "10/second"
+  }
+}
+
+
+GET /info
+→ prints help documentation
+
+Protected Endpoint
+
+GET /random?n=<bytes>[&fmt=hex]
+
+n — number of bytes (required)
+
+fmt — optional (hex or omitted)
+
+Auth required (API key)
+
+Auth methods
+
+Header
+x-api-key: change-me
+
+Query
+?key=change-me
+
+Examples
+16 bytes (hex)
+curl -s -H 'x-api-key: change-me' \
+  'http://127.0.0.1:8080/random?n=16&fmt=hex'
+
+
+→ 63968169edffa881f6a4f6d0adc406eb
+
+64 raw bytes
+curl -s -H 'x-api-key: change-me' \
+  'http://127.0.0.1:8080/random?n=64' --output sample.bin
+hexdump -C sample.bin | sed -n '1,6p'
+
+Invalid key
+curl -i -s -H 'x-api-key: WRONG' \
+  'http://127.0.0.1:8080/random?n=16&fmt=hex'
+
+
+→ 401 Unauthorized {"detail": "invalid api key"}
+
+4️⃣ Security / Limits
+
+Rate limit: 10/second per client IP
+
+Max bytes per request: 1,000,000
+
+Logs to journalctl:
+
+[re4/random] ip=127.0.0.1 n=16 fmt=hex head4=7eca4753
+
+
+Change API key or limits in .env then restart:
+
+sudo systemctl restart re4ctor-api
+
+5️⃣ CI / Future Plans
+
+Ideas for GitHub Actions:
+
+Build re4ctor-core (cmake + ninja)
+
+Run ./build/re4_dump | head -c 32
+
+Test /version endpoint schema
+
+Optional: PractRand / dieharder statistical tests
+
+6️⃣ TL;DR
+
+✅ re4ctor-core → generates true entropy bytes (C)
+✅ re4ctor-api → REST interface with key auth & rate limit
+✅ Runs as systemd service on port 8080
