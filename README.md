@@ -19,8 +19,9 @@ There's a small FastAPI app (re4ctor-api) that exposes:
 - GET /random  → random bytes, requires API key
 
 Auth:
-- header: x-api-key: <KEY>
-- or query: ?key=<KEY>
+- eader: x-api-key: local-demo
+
+- or query: ?key=local-demo
 
 Example (hex):
 curl -s -H "x-api-key: local-demo" \
