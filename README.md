@@ -1,3 +1,47 @@
+# 🧬 re4ctor-core
+
+Status: Public Drop v0.1
+Build type: Verified core + signed user binary
+Includes: FastAPI /random service, usage docs, systemd unit, and SBOM proof
+License: Restricted public binary, internal entropy core not disclosed
+
+This release provides a reproducible entropy tap with verifiable statistical quality and an operational API layer.
+
+---
+
+API service
+
+There's a small FastAPI app (re4ctor-api) that exposes:
+
+- GET /health  → "ok"
+- GET /version → build info + git rev
+- GET /info    → usage help
+- GET /random  → random bytes, requires API key
+
+Auth:
+- header: x-api-key: <KEY>
+- or query: ?key=<KEY>
+
+Example (hex):
+curl -s -H "x-api-key: local-demo" \
+  "http://127.0.0.1:8080/random?n=16&fmt=hex"
+
+Example (raw bytes → hexdump):
+curl -s -H "x-api-key: local-demo" \
+  "http://127.0.0.1:8080/random?n=64" | hexdump -C
+
+Rate limiting:
+- default 10/second per client IP
+- max 1,000,000 bytes per request
+
+---
+
+For detailed operator and deployment instructions see:
+docs/USAGE.md
+docs/re4ctor-api.service.example
+
+---
+
 [![tests](https://github.com/pipavlo82/re4ctor-core/actions/workflows/tests.yml/badge.svg)](https://github.com/pipavlo82/re4ctor-core/actions/workflows/tests.yml) [![build-matrix](https://github.com/pipavlo82/re4ctor-core/actions/workflows/build-matrix.yml/badge.svg)](https://github.com/pipavlo82/re4ctor-core/actions/workflows/build-matrix.yml)
 
 # RE4CTOR Core
