@@ -1,9 +1,14 @@
+# build artifacts
 build/
-proof/
-*.bin
-*.o
-*.a
-*.log
-*.txt
-.DS_Store
-*.bak
+release/bin/
+*.tar.gz
+*.sha256
+*.asc
+
+# Python envs
+.venv/
+__pycache__/
+
+# Editor temp files
+*.swp
+*.swo
