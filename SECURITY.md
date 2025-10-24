@@ -2,19 +2,26 @@
 
 ## Threat Model
 
-The `re4ctor-core` generator operates as an opaque DRBG — similar to Apple Secure Enclave or Intel SGX.  
-Internal entropy sources and DRBG logic are **not** public.
+The `re4ctor-core` generator functions as an opaque DRBG engine, similar to Apple Secure Enclave or Intel SGX.
 
-Instead, transparency is achieved through:
-- Continuous external validation via statistical suites (Dieharder, PractRand, NIST STS)
-- SBOM publication for shipped binaries
-- GPG-signed release bundles
-- Reproducible verification by end users
+### Transparency without exposure
+- Internal entropy and DRBG code are not public.
+- External validation via `dieharder`, `PractRand`, `NIST STS`, `BigCrush`.
+- Reproducible SBOM (SPDX 2.3) and GPG-signed release bundles.
+- API protected by static key, rate limiting, and journald audit logging.
 
-Consumers can **verify output integrity**, but cannot reconstruct or reverse-engineer the entropy core.
+### Design assumptions
+- Host system integrity is maintained (no kernel compromise).
+- Network connections to `/random` are authenticated and rate-limited.
+- Attackers cannot modify binaries without failing signature or hash verification.
 
-In other words: we prove the tap water is clean, without giving you the plumbing diagram.
+### Recommendations for operators
+- Rotate `API_KEY` monthly.
+- Restrict `.env` to mode `600` and trusted users.
+- Enable `journalctl` logging and review `/random` access patterns.
+- Deploy under systemd sandbox (`ProtectSystem=strict`, `NoNewPrivileges=yes`).
 
-## Reporting a vulnerability
-Please report any potential security issues privately via email:
-**shtomko@gmail.com**
+### Reporting a vulnerability
+Report privately to  
+📧 **security@re4ctor.dev**  
+🔑 GPG: `ED5B0368114DA3AE355E4C6166056461E00D386B`
