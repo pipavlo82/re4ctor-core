@@ -82,3 +82,15 @@ Each /random call is logged like:
 
 For hardened Linux installations, see:
 docs/re4ctor-api.service.example
+---
+
+## Security posture summary
+
+- The generator core is not published. You receive a compiled binary (`re4_dump`) instead of full DRBG/entropy source.
+- Every release is shipped with:
+  - SHA256 manifest
+  - Detached GPG signature
+  - SBOM (SPDX 2.3) describing shipped artifacts
+- `/random` is authenticated (API key) and rate-limited.
+- Each `/random` call is logged with client IP, size requested, and a short fingerprint of the output, so operators can audit access.
+- A hardened systemd unit is provided (`docs/re4ctor-api.service.example`) to run the service under a dedicated system user with restricted privileges.
