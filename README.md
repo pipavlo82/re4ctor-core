@@ -220,7 +220,14 @@ Optional: PractRand / dieharder statistical tests
 ✅ Runs as systemd service on port 8080
 
 # re4ctor-core (public drop)
+## Quick Verify
 
+Download and verify the release in 2 commands:
+
+```bash
+sha256sum -c re4_release.sha256
+gpg --verify re4_release.tar.gz.asc re4_release.tar.gz
+If both pass — you have exactly what we built.
 This repo publishes:
 - a minimal RNG binary (`re4_dump`) built from a private core,
 - a test harness and CI proof,
@@ -332,10 +339,9 @@ Rate limiting:
 default 10/second per client IP
 
 max 1,000,000 bytes per request
+### systemd unit (simplified)
 
-systemd unit (simplified):
-ini
-Copy code
+```ini
 [Service]
 WorkingDirectory=/home/pavlo/re4ctor-api
 EnvironmentFile=/home/pavlo/re4ctor-api/.env
@@ -344,14 +350,15 @@ ExecStart=/home/pavlo/re4ctor-api/.venv/bin/uvicorn main:app \
 Restart=on-failure
 User=pavlo
 Group=pavlo
-.env looks like:
 
-bash
-Copy code
+`.env` looks like:
+
+```bash
 API_HOST=0.0.0.0
 API_PORT=8080
 API_KEY=change-me
 API_GIT=my-lab-tag
+
 We expose core_git (commit of generator core) and api_git
 (commit/tag for the API) via /version.
 
